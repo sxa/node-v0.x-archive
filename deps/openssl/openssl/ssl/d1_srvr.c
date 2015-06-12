@@ -224,13 +224,11 @@ int dtls1_accept(SSL *s)
             if (s->init_buf == NULL) {
                 if ((buf = BUF_MEM_new()) == NULL) {
                     ret = -1;
-                    s->state = SSL_ST_ERR;
                     goto end;
                 }
                 if (!BUF_MEM_grow(buf, SSL3_RT_MAX_PLAIN_LENGTH)) {
                     BUF_MEM_free(buf);
                     ret = -1;
-                    s->state = SSL_ST_ERR;
                     goto end;
                 }
                 s->init_buf = buf;
@@ -238,7 +236,6 @@ int dtls1_accept(SSL *s)
 
             if (!ssl3_setup_buffers(s)) {
                 ret = -1;
-                s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -260,7 +257,6 @@ int dtls1_accept(SSL *s)
 #endif
                     if (!ssl_init_wbio_buffer(s, 1)) {
                         ret = -1;
-                        s->state = SSL_ST_ERR;
                         goto end;
                     }
 
@@ -474,7 +470,7 @@ int dtls1_accept(SSL *s)
 #ifndef OPENSSL_NO_PSK
                 || ((alg_k & SSL_kPSK) && s->ctx->psk_identity_hint)
 #endif
-                || (alg_k & SSL_kEDH)
+                || (alg_k & (SSL_kEDH | SSL_kDHr | SSL_kDHd))
                 || (alg_k & SSL_kEECDH)
                 || ((alg_k & SSL_kRSA)
                     && (s->cert->pkeys[SSL_PKEY_RSA_ENC].privatekey == NULL
@@ -669,6 +665,15 @@ int dtls1_accept(SSL *s)
 
         case SSL3_ST_SR_CERT_VRFY_A:
         case SSL3_ST_SR_CERT_VRFY_B:
+            /*
+             * This *should* be the first time we enable CCS, but be
+             * extra careful about surrounding code changes. We need
+             * to set this here because we don't know if we're
+             * expecting a CertificateVerify or not.
+             */
+            if (!s->s3->change_cipher_spec)
+                s->d1->change_cipher_spec_ok = 1;
+            /* we should decide if we expected this one */
             ret = ssl3_get_cert_verify(s);
             if (ret <= 0)
                 goto end;
@@ -685,10 +690,11 @@ int dtls1_accept(SSL *s)
         case SSL3_ST_SR_FINISHED_A:
         case SSL3_ST_SR_FINISHED_B:
             /*
-             * Enable CCS. Receiving a CCS clears the flag, so make
-             * sure not to re-enable it to ban duplicates. This *should* be the
-             * first time we have received one - but we check anyway to be
-             * cautious.
+             * Enable CCS for resumed handshakes.
+             * In a full handshake, we end up here through
+             * SSL3_ST_SR_CERT_VRFY_B, so change_cipher_spec_ok was
+             * already set. Receiving a CCS clears the flag, so make
+             * sure not to re-enable it to ban duplicates.
              * s->s3->change_cipher_spec is set when a CCS is
              * processed in d1_pkt.c, and remains set until
              * the client's Finished message is read.
@@ -738,7 +744,6 @@ int dtls1_accept(SSL *s)
             s->session->cipher = s->s3->tmp.new_cipher;
             if (!s->method->ssl3_enc->setup_key_block(s)) {
                 ret = -1;
-                s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -767,7 +772,6 @@ int dtls1_accept(SSL *s)
                                                           SSL3_CHANGE_CIPHER_SERVER_WRITE))
             {
                 ret = -1;
-                s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -848,7 +852,6 @@ int dtls1_accept(SSL *s)
             goto end;
             /* break; */
 
-        case SSL_ST_ERR:
         default:
             SSLerr(SSL_F_DTLS1_ACCEPT, SSL_R_UNKNOWN_STATE);
             ret = -1;
@@ -929,7 +932,6 @@ int dtls1_send_hello_verify_request(SSL *s)
                                       &(s->d1->cookie_len)) == 0) {
             SSLerr(SSL_F_DTLS1_SEND_HELLO_VERIFY_REQUEST,
                    ERR_R_INTERNAL_ERROR);
-            s->state = SSL_ST_ERR;
             return 0;
         }
 

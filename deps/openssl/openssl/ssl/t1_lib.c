@@ -1016,23 +1016,19 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
 
     s->srtp_profile = NULL;
 
-    if (data >= (d + n - 2)) {
-        if (data != d + n)
-            goto err;
-        else
-            goto ri_check;
-    }
+    if (data >= (d + n - 2))
+        goto ri_check;
     n2s(data, len);
 
     if (data > (d + n - len))
-        goto err;
+        goto ri_check;
 
     while (data <= (d + n - 4)) {
         n2s(data, type);
         n2s(data, size);
 
         if (data + size > (d + n))
-            goto err;
+            goto ri_check;
 # if 0
         fprintf(stderr, "Received extension type %d size %d\n", type, size);
 # endif
@@ -1068,12 +1064,16 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
             int servname_type;
             int dsize;
 
-            if (size < 2)
-                goto err;
+            if (size < 2) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
             n2s(data, dsize);
             size -= 2;
-            if (dsize > size)
-                goto err;
+            if (dsize > size) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
 
             sdata = data;
             while (dsize > 3) {
@@ -1081,16 +1081,18 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
                 n2s(sdata, len);
                 dsize -= 3;
 
-                if (len > dsize)
-                    goto err;
-
+                if (len > dsize) {
+                    *al = SSL_AD_DECODE_ERROR;
+                    return 0;
+                }
                 if (s->servername_done == 0)
                     switch (servname_type) {
                     case TLSEXT_NAMETYPE_host_name:
                         if (!s->hit) {
-                            if (s->session->tlsext_hostname)
-                                goto err;
-
+                            if (s->session->tlsext_hostname) {
+                                *al = SSL_AD_DECODE_ERROR;
+                                return 0;
+                            }
                             if (len > TLSEXT_MAXLEN_host_name) {
                                 *al = TLS1_AD_UNRECOGNIZED_NAME;
                                 return 0;
@@ -1124,23 +1126,31 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
 
                 dsize -= len;
             }
-            if (dsize != 0)
-                goto err;
+            if (dsize != 0) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
 
         }
 # ifndef OPENSSL_NO_SRP
         else if (type == TLSEXT_TYPE_srp) {
-            if (size == 0 || ((len = data[0])) != (size - 1))
-                goto err;
-            if (s->srp_ctx.login != NULL)
-                goto err;
+            if (size <= 0 || ((len = data[0])) != (size - 1)) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
+            if (s->srp_ctx.login != NULL) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
             if ((s->srp_ctx.login = OPENSSL_malloc(len + 1)) == NULL)
                 return -1;
             memcpy(s->srp_ctx.login, &data[1], len);
             s->srp_ctx.login[len] = '\0';
 
-            if (strlen(s->srp_ctx.login) != len)
-                goto err;
+            if (strlen(s->srp_ctx.login) != len) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
         }
 # endif
 
@@ -1149,8 +1159,10 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
             unsigned char *sdata = data;
             int ecpointformatlist_length = *(sdata++);
 
-            if (ecpointformatlist_length != size - 1)
-                goto err;
+            if (ecpointformatlist_length != size - 1) {
+                *al = TLS1_AD_DECODE_ERROR;
+                return 0;
+            }
             if (!s->hit) {
                 if (s->session->tlsext_ecpointformatlist) {
                     OPENSSL_free(s->session->tlsext_ecpointformatlist);
@@ -1184,13 +1196,15 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
             if (ellipticcurvelist_length != size - 2 ||
                 ellipticcurvelist_length < 1 ||
                 /* Each NamedCurve is 2 bytes. */
-                ellipticcurvelist_length & 1)
-                    goto err;
-
+                ellipticcurvelist_length & 1) {
+                *al = TLS1_AD_DECODE_ERROR;
+                return 0;
+            }
             if (!s->hit) {
-                if (s->session->tlsext_ellipticcurvelist)
-                    goto err;
-
+                if (s->session->tlsext_ellipticcurvelist) {
+                    *al = TLS1_AD_DECODE_ERROR;
+                    return 0;
+                }
                 s->session->tlsext_ellipticcurvelist_length = 0;
                 if ((s->session->tlsext_ellipticcurvelist =
                      OPENSSL_malloc(ellipticcurvelist_length)) == NULL) {
@@ -1259,20 +1273,28 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
             renegotiate_seen = 1;
         } else if (type == TLSEXT_TYPE_signature_algorithms) {
             int dsize;
-            if (sigalg_seen || size < 2)
-                goto err;
+            if (sigalg_seen || size < 2) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
             sigalg_seen = 1;
             n2s(data, dsize);
             size -= 2;
-            if (dsize != size || dsize & 1)
-                goto err;
-            if (!tls1_process_sigalgs(s, data, dsize))
-                goto err;
+            if (dsize != size || dsize & 1) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
+            if (!tls1_process_sigalgs(s, data, dsize)) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
         } else if (type == TLSEXT_TYPE_status_request &&
                    s->version != DTLS1_VERSION) {
 
-            if (size < 5)
-                goto err;
+            if (size < 5) {
+                *al = SSL_AD_DECODE_ERROR;
+                return 0;
+            }
 
             s->tlsext_status_type = *data++;
             size--;
@@ -1282,26 +1304,35 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
                 /* Read in responder_id_list */
                 n2s(data, dsize);
                 size -= 2;
-                if (dsize > size)
-                    goto err;
+                if (dsize > size) {
+                    *al = SSL_AD_DECODE_ERROR;
+                    return 0;
+                }
                 while (dsize > 0) {
                     OCSP_RESPID *id;
                     int idsize;
-                    if (dsize < 4)
-                        goto err;
+                    if (dsize < 4) {
+                        *al = SSL_AD_DECODE_ERROR;
+                        return 0;
+                    }
                     n2s(data, idsize);
                     dsize -= 2 + idsize;
                     size -= 2 + idsize;
-                    if (dsize < 0)
-                        goto err;
+                    if (dsize < 0) {
+                        *al = SSL_AD_DECODE_ERROR;
+                        return 0;
+                    }
                     sdata = data;
                     data += idsize;
                     id = d2i_OCSP_RESPID(NULL, &sdata, idsize);
-                    if (!id)
-                        goto err;
+                    if (!id) {
+                        *al = SSL_AD_DECODE_ERROR;
+                        return 0;
+                    }
                     if (data != sdata) {
                         OCSP_RESPID_free(id);
-                        goto err;
+                        *al = SSL_AD_DECODE_ERROR;
+                        return 0;
                     }
                     if (!s->tlsext_ocsp_ids
                         && !(s->tlsext_ocsp_ids =
@@ -1318,12 +1349,16 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
                 }
 
                 /* Read in request_extensions */
-                if (size < 2)
-                    goto err;
+                if (size < 2) {
+                    *al = SSL_AD_DECODE_ERROR;
+                    return 0;
+                }
                 n2s(data, dsize);
                 size -= 2;
-                if (dsize != size)
-                    goto err;
+                if (dsize != size) {
+                    *al = SSL_AD_DECODE_ERROR;
+                    return 0;
+                }
                 sdata = data;
                 if (dsize > 0) {
                     if (s->tlsext_ocsp_exts) {
@@ -1333,8 +1368,10 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
 
                     s->tlsext_ocsp_exts =
                         d2i_X509_EXTENSIONS(NULL, &sdata, dsize);
-                    if (!s->tlsext_ocsp_exts || (data + dsize != sdata))
-                        goto err;
+                    if (!s->tlsext_ocsp_exts || (data + dsize != sdata)) {
+                        *al = SSL_AD_DECODE_ERROR;
+                        return 0;
+                    }
                 }
             }
             /*
@@ -1395,10 +1432,6 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
         data += size;
     }
 
-    /* Spurious data on the end */
-    if (data != d + n)
-        goto err;
-
     *p = data;
 
  ri_check:
@@ -1414,9 +1447,6 @@ int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **p, unsigned char *d,
     }
 
     return 1;
-err:
-    *al = SSL_AD_DECODE_ERROR;
-    return 0;
 }
 
 # ifndef OPENSSL_NO_NEXTPROTONEG
@@ -2582,10 +2612,7 @@ int tls1_process_heartbeat(SSL *s)
         memcpy(bp, pl, payload);
         bp += payload;
         /* Random padding */
-        if (RAND_pseudo_bytes(bp, padding) < 0) {
-            OPENSSL_free(buffer);
-            return -1;
-        }
+        RAND_pseudo_bytes(bp, padding);
 
         r = ssl3_write_bytes(s, TLS1_RT_HEARTBEAT, buffer,
                              3 + payload + padding);
@@ -2620,7 +2647,7 @@ int tls1_process_heartbeat(SSL *s)
 int tls1_heartbeat(SSL *s)
 {
     unsigned char *buf, *p;
-    int ret = -1;
+    int ret;
     unsigned int payload = 18;  /* Sequence number + random bytes */
     unsigned int padding = 16;  /* Use minimum padding */
 
@@ -2668,16 +2695,10 @@ int tls1_heartbeat(SSL *s)
     /* Sequence number */
     s2n(s->tlsext_hb_seq, p);
     /* 16 random bytes */
-    if (RAND_pseudo_bytes(p, 16) < 0) {
-        SSLerr(SSL_F_TLS1_HEARTBEAT, ERR_R_INTERNAL_ERROR);
-        goto err;
-    }
+    RAND_pseudo_bytes(p, 16);
     p += 16;
     /* Random padding */
-    if (RAND_pseudo_bytes(p, padding) < 0) {
-        SSLerr(SSL_F_TLS1_HEARTBEAT, ERR_R_INTERNAL_ERROR);
-        goto err;
-    }
+    RAND_pseudo_bytes(p, padding);
 
     ret = ssl3_write_bytes(s, TLS1_RT_HEARTBEAT, buf, 3 + payload + padding);
     if (ret >= 0) {
@@ -2689,7 +2710,6 @@ int tls1_heartbeat(SSL *s)
         s->tlsext_hb_pending = 1;
     }
 
-err:
     OPENSSL_free(buf);
 
     return ret;

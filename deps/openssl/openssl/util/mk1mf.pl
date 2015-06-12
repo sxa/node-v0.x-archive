@@ -326,7 +326,7 @@ open(IN,"<$infile") || die "unable to open $infile:$!\n";
 $_=<IN>;
 for (;;)
 	{
-	s/\s*$//; # was chop, didn't work in mixture of perls for Windows...
+	chop;
 
 	($key,$val)=/^([^=]+)=(.*)/;
 	if ($key eq "RELATIVE_DIRECTORY")

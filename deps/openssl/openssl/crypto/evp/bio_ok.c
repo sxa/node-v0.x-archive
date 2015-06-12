@@ -491,8 +491,7 @@ static int sig_out(BIO *b)
      * FIXME: there's absolutely no guarantee this makes any sense at all,
      * particularly now EVP_MD_CTX has been restructured.
      */
-    if (RAND_pseudo_bytes(md->md_data, md->digest->md_size) < 0)
-        goto berr;
+    RAND_pseudo_bytes(md->md_data, md->digest->md_size);
     memcpy(&(ctx->buf[ctx->buf_len]), md->md_data, md->digest->md_size);
     longswap(&(ctx->buf[ctx->buf_len]), md->digest->md_size);
     ctx->buf_len += md->digest->md_size;

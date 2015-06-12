@@ -142,10 +142,8 @@
  */
 #undef ROTATE
 #ifndef PEDANTIC
-# if defined(_MSC_VER)
+# if defined(_MSC_VER) || defined(__ICC)
 #  define ROTATE(a,n)   _lrotl(a,n)
-# elif defined(__ICC)
-#  define ROTATE(a,n)   _rotl(a,n)
 # elif defined(__MWERKS__)
 #  if defined(__POWERPC__)
 #   define ROTATE(a,n)  __rlwinm(a,n,0,31)

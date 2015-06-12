@@ -299,17 +299,16 @@ static void dgram_adjust_rcv_timeout(BIO *b)
 
         /* Calculate time left until timer expires */
         memcpy(&timeleft, &(data->next_timeout), sizeof(struct timeval));
-        if (timeleft.tv_usec < timenow.tv_usec) {
-            timeleft.tv_usec = 1000000 - timenow.tv_usec + timeleft.tv_usec;
+        timeleft.tv_sec -= timenow.tv_sec;
+        timeleft.tv_usec -= timenow.tv_usec;
+        if (timeleft.tv_usec < 0) {
             timeleft.tv_sec--;
-        } else {
-            timeleft.tv_usec -= timenow.tv_usec;
+            timeleft.tv_usec += 1000000;
         }
-        if (timeleft.tv_sec < timenow.tv_sec) {
+
+        if (timeleft.tv_sec < 0) {
             timeleft.tv_sec = 0;
             timeleft.tv_usec = 1;
-        } else {
-            timeleft.tv_sec -= timenow.tv_sec;
         }
 
         /*
@@ -954,7 +953,7 @@ BIO *BIO_new_dgram_sctp(int fd, int close_flag)
      */
     sockopt_len = (socklen_t) (sizeof(sctp_assoc_t) + 256 * sizeof(uint8_t));
     authchunks = OPENSSL_malloc(sockopt_len);
-    if (!authchunks) {
+    if(!authchunks) {
         BIO_vfree(bio);
         return (NULL);
     }
@@ -1294,7 +1293,7 @@ static int dgram_sctp_read(BIO *b, char *out, int outl)
                 (socklen_t) (sizeof(sctp_assoc_t) + 256 * sizeof(uint8_t));
             authchunks = OPENSSL_malloc(optlen);
             if (!authchunks) {
-                BIOerr(BIO_F_DGRAM_SCTP_READ, ERR_R_MALLOC_FAILURE);
+                BIOerr(BIO_F_DGRAM_SCTP_READ, ERR_R_MALLOC_ERROR);
                 return -1;
             }
             memset(authchunks, 0, sizeof(optlen));
@@ -1365,8 +1364,8 @@ static int dgram_sctp_write(BIO *b, const char *in, int inl)
     if (data->save_shutdown && !BIO_dgram_sctp_wait_for_dry(b)) {
         char *tmp;
         data->saved_message.bio = b;
-        if (!(tmp = OPENSSL_malloc(inl))) {
-            BIOerr(BIO_F_DGRAM_SCTP_WRITE, ERR_R_MALLOC_FAILURE);
+        if(!(tmp = OPENSSL_malloc(inl))) {
+            BIOerr(BIO_F_DGRAM_SCTP_WRITE, ERR_R_MALLOC_ERROR);
             return -1;
         }
         if (data->saved_message.data)

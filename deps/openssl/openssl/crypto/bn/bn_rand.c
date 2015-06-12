@@ -121,11 +121,6 @@ static int bnrand(int pseudorand, BIGNUM *rnd, int bits, int top, int bottom)
     int ret = 0, bit, bytes, mask;
     time_t tim;
 
-    if (bits < 0 || (bits == 1 && top > 0)) {
-        BNerr(BN_F_BNRAND, BN_R_BITS_TOO_SMALL);
-        return 0;
-    }
-
     if (bits == 0) {
         BN_zero(rnd);
         return 1;
@@ -162,8 +157,7 @@ static int bnrand(int pseudorand, BIGNUM *rnd, int bits, int top, int bottom)
         unsigned char c;
 
         for (i = 0; i < bytes; i++) {
-            if (RAND_pseudo_bytes(&c, 1) < 0)
-                goto err;
+            RAND_pseudo_bytes(&c, 1);
             if (c >= 128 && i > 0)
                 buf[i] = buf[i - 1];
             else if (c < 42)
@@ -174,7 +168,7 @@ static int bnrand(int pseudorand, BIGNUM *rnd, int bits, int top, int bottom)
     }
 #endif
 
-    if (top >= 0) {
+    if (top != -1) {
         if (top) {
             if (bit == 0) {
                 buf[0] = 1;

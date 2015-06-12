@@ -151,11 +151,11 @@ static int x509_subject_cmp(X509 **a, X509 **b)
 
 int X509_verify_cert(X509_STORE_CTX *ctx)
 {
-    X509 *x, *xtmp, *xtmp2, *chain_ss = NULL;
+    X509 *x, *xtmp, *chain_ss = NULL;
     int bad_chain = 0;
     X509_VERIFY_PARAM *param = ctx->param;
     int depth, i, ok = 0;
-    int num, j, retry;
+    int num;
     int (*cb) (int xok, X509_STORE_CTX *xctx);
     STACK_OF(X509) *sktmp = NULL;
     if (ctx->cert == NULL) {
@@ -224,118 +224,85 @@ int X509_verify_cert(X509_STORE_CTX *ctx)
         break;
     }
 
-    /* Remember how many untrusted certs we have */
-    j = num;
     /*
      * at this point, chain should contain a list of untrusted certificates.
      * We now need to add at least one trusted one, if possible, otherwise we
      * complain.
      */
 
-    do {
-        /*
-         * Examine last certificate in chain and see if it is self signed.
-         */
-        i = sk_X509_num(ctx->chain);
-        x = sk_X509_value(ctx->chain, i - 1);
-        if (ctx->check_issued(ctx, x, x)) {
-            /* we have a self signed certificate */
-            if (sk_X509_num(ctx->chain) == 1) {
-                /*
-                 * We have a single self signed certificate: see if we can
-                 * find it in the store. We must have an exact match to avoid
-                 * possible impersonation.
-                 */
-                ok = ctx->get_issuer(&xtmp, ctx, x);
-                if ((ok <= 0) || X509_cmp(x, xtmp)) {
-                    ctx->error = X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT;
-                    ctx->current_cert = x;
-                    ctx->error_depth = i - 1;
-                    if (ok == 1)
-                        X509_free(xtmp);
-                    bad_chain = 1;
-                    ok = cb(0, ctx);
-                    if (!ok)
-                        goto end;
-                } else {
-                    /*
-                     * We have a match: replace certificate with store
-                     * version so we get any trust settings.
-                     */
-                    X509_free(x);
-                    x = xtmp;
-                    (void)sk_X509_set(ctx->chain, i - 1, x);
-                    ctx->last_untrusted = 0;
-                }
+    /*
+     * Examine last certificate in chain and see if it is self signed.
+     */
+
+    i = sk_X509_num(ctx->chain);
+    x = sk_X509_value(ctx->chain, i - 1);
+    if (ctx->check_issued(ctx, x, x)) {
+        /* we have a self signed certificate */
+        if (sk_X509_num(ctx->chain) == 1) {
+            /*
+             * We have a single self signed certificate: see if we can find
+             * it in the store. We must have an exact match to avoid possible
+             * impersonation.
+             */
+            ok = ctx->get_issuer(&xtmp, ctx, x);
+            if ((ok <= 0) || X509_cmp(x, xtmp)) {
+                ctx->error = X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT;
+                ctx->current_cert = x;
+                ctx->error_depth = i - 1;
+                if (ok == 1)
+                    X509_free(xtmp);
+                bad_chain = 1;
+                ok = cb(0, ctx);
+                if (!ok)
+                    goto end;
             } else {
                 /*
-                 * extract and save self signed certificate for later use
+                 * We have a match: replace certificate with store version so
+                 * we get any trust settings.
                  */
-                chain_ss = sk_X509_pop(ctx->chain);
-                ctx->last_untrusted--;
-                num--;
-                j--;
-                x = sk_X509_value(ctx->chain, num - 1);
+                X509_free(x);
+                x = xtmp;
+                (void)sk_X509_set(ctx->chain, i - 1, x);
+                ctx->last_untrusted = 0;
             }
+        } else {
+            /*
+             * extract and save self signed certificate for later use
+             */
+            chain_ss = sk_X509_pop(ctx->chain);
+            ctx->last_untrusted--;
+            num--;
+            x = sk_X509_value(ctx->chain, num - 1);
         }
-        /* We now lookup certs from the certificate store */
-        for (;;) {
-            /* If we have enough, we break */
-            if (depth < num)
-                break;
-            /* If we are self signed, we break */
-            if (ctx->check_issued(ctx, x, x))
-                break;
-            ok = ctx->get_issuer(&xtmp, ctx, x);
-            if (ok < 0)
-                return ok;
-            if (ok == 0)
-                break;
-            x = xtmp;
-            if (!sk_X509_push(ctx->chain, x)) {
-                X509_free(xtmp);
-                X509err(X509_F_X509_VERIFY_CERT, ERR_R_MALLOC_FAILURE);
-                return 0;
-            }
-            num++;
-        }
+    }
 
-        /*
-         * If we haven't got a least one certificate from our store then check
-         * if there is an alternative chain that could be used.  We only do this
-         * if the user hasn't switched off alternate chain checking
-         */
-        retry = 0;
-        if (j == ctx->last_untrusted &&
-            !(ctx->param->flags & X509_V_FLAG_NO_ALT_CHAINS)) {
-            while (j-- > 1) {
-                xtmp2 = sk_X509_value(ctx->chain, j - 1);
-                ok = ctx->get_issuer(&xtmp, ctx, xtmp2);
-                if (ok < 0)
-                    goto end;
-                /* Check if we found an alternate chain */
-                if (ok > 0) {
-                    /*
-                     * Free up the found cert we'll add it again later
-                     */
-                    X509_free(xtmp);
+    /* We now lookup certs from the certificate store */
+    for (;;) {
+        /* If we have enough, we break */
+        if (depth < num)
+            break;
 
-                    /*
-                     * Dump all the certs above this point - we've found an
-                     * alternate chain
-                     */
-                    while (num > j) {
-                        xtmp = sk_X509_pop(ctx->chain);
-                        X509_free(xtmp);
-                        num--;
-                        ctx->last_untrusted--;
-                    }
-                    retry = 1;
-                    break;
-                }
-            }
+        /* If we are self signed, we break */
+        if (ctx->check_issued(ctx, x, x))
+            break;
+
+        ok = ctx->get_issuer(&xtmp, ctx, x);
+
+        if (ok < 0)
+            return ok;
+        if (ok == 0)
+            break;
+
+        x = xtmp;
+        if (!sk_X509_push(ctx->chain, x)) {
+            X509_free(xtmp);
+            X509err(X509_F_X509_VERIFY_CERT, ERR_R_MALLOC_FAILURE);
+            return 0;
         }
-    } while (retry);
+        num++;
+    }
+
+    /* we now have our chain, lets check it... */
 
     /* Is last certificate looked up self signed? */
     if (!ctx->check_issued(ctx, x, x)) {
@@ -1637,83 +1604,46 @@ int X509_cmp_time(const ASN1_TIME *ctm, time_t *cmp_time)
     ASN1_TIME atm;
     long offset;
     char buff1[24], buff2[24], *p;
-    int i, j, remaining;
+    int i, j;
 
     p = buff1;
-    remaining = ctm->length;
+    i = ctm->length;
     str = (char *)ctm->data;
-    /*
-     * Note that the following (historical) code allows much more slack in the
-     * time format than RFC5280. In RFC5280, the representation is fixed:
-     * UTCTime: YYMMDDHHMMSSZ
-     * GeneralizedTime: YYYYMMDDHHMMSSZ
-     */
     if (ctm->type == V_ASN1_UTCTIME) {
-        /* YYMMDDHHMM[SS]Z or YYMMDDHHMM[SS](+-)hhmm */
-        int min_length = sizeof("YYMMDDHHMMZ") - 1;
-        int max_length = sizeof("YYMMDDHHMMSS+hhmm") - 1;
-        if (remaining < min_length || remaining > max_length)
+        if ((i < 11) || (i > 17))
             return 0;
         memcpy(p, str, 10);
         p += 10;
         str += 10;
-        remaining -= 10;
     } else {
-        /* YYYYMMDDHHMM[SS[.fff]]Z or YYYYMMDDHHMM[SS[.f[f[f]]]](+-)hhmm */
-        int min_length = sizeof("YYYYMMDDHHMMZ") - 1;
-        int max_length = sizeof("YYYYMMDDHHMMSS.fff+hhmm") - 1;
-        if (remaining < min_length || remaining > max_length)
+        if (i < 13)
             return 0;
         memcpy(p, str, 12);
         p += 12;
         str += 12;
-        remaining -= 12;
     }
 
     if ((*str == 'Z') || (*str == '-') || (*str == '+')) {
         *(p++) = '0';
         *(p++) = '0';
     } else {
-        /* SS (seconds) */
-        if (remaining < 2)
-            return 0;
         *(p++) = *(str++);
         *(p++) = *(str++);
-        remaining -= 2;
-        /*
-         * Skip any (up to three) fractional seconds...
-         * TODO(emilia): in RFC5280, fractional seconds are forbidden.
-         * Can we just kill them altogether?
-         */
-        if (remaining && *str == '.') {
+        /* Skip any fractional seconds... */
+        if (*str == '.') {
             str++;
-            remaining--;
-            for (i = 0; i < 3 && remaining; i++, str++, remaining--) {
-                if (*str < '0' || *str > '9')
-                    break;
-            }
+            while ((*str >= '0') && (*str <= '9'))
+                str++;
         }
 
     }
     *(p++) = 'Z';
     *(p++) = '\0';
 
-    /* We now need either a terminating 'Z' or an offset. */
-    if (!remaining)
-        return 0;
-    if (*str == 'Z') {
-        if (remaining != 1)
-            return 0;
+    if (*str == 'Z')
         offset = 0;
-    } else {
-        /* (+-)HHMM */
+    else {
         if ((*str != '+') && (*str != '-'))
-            return 0;
-        /* Historical behaviour: the (+-)hhmm offset is forbidden in RFC5280. */
-        if (remaining != 5)
-            return 0;
-        if (str[1] < '0' || str[1] > '9' || str[2] < '0' || str[2] > '9' ||
-            str[3] < '0' || str[3] > '9' || str[4] < '0' || str[4] > '9')
             return 0;
         offset = ((str[1] - '0') * 10 + (str[2] - '0')) * 60;
         offset += (str[3] - '0') * 10 + (str[4] - '0');
@@ -1991,8 +1921,6 @@ X509_STORE_CTX *X509_STORE_CTX_new(void)
 
 void X509_STORE_CTX_free(X509_STORE_CTX *ctx)
 {
-    if (!ctx)
-        return;
     X509_STORE_CTX_cleanup(ctx);
     OPENSSL_free(ctx);
 }

@@ -111,7 +111,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> /* for memcpy() */
 #define USE_SOCKETS
 #define NON_MAIN
 #include "apps.h"
@@ -748,7 +747,7 @@ int MS_CALLBACK generate_cookie_callback(SSL *ssl, unsigned char *cookie,
 
     /* Initialize a random secret */
     if (!cookie_initialized) {
-        if (RAND_bytes(cookie_secret, COOKIE_SECRET_LENGTH) <= 0) {
+        if (!RAND_bytes(cookie_secret, COOKIE_SECRET_LENGTH)) {
             BIO_printf(bio_err, "error setting random cookie secret\n");
             return 0;
         }

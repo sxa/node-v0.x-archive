@@ -761,8 +761,7 @@ SSL_CTX *tls_create_ctx(struct tls_create_ctx_args a, void *apparg)
         if (tls_dhe1024 == NULL) {
             int i;
 
-            if (RAND_bytes((unsigned char *)&i, sizeof i) <= 0)
-                goto err_return;
+            RAND_bytes((unsigned char *)&i, sizeof i);
             /*
              * make sure that i is non-negative -- pick one of the provided
              * seeds

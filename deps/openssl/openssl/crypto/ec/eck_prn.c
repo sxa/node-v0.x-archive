@@ -338,14 +338,12 @@ static int print_bin(BIO *fp, const char *name, const unsigned char *buf,
 
     if (buf == NULL)
         return 1;
-    if (off > 0) {
+    if (off) {
         if (off > 128)
             off = 128;
         memset(str, ' ', off);
         if (BIO_write(fp, str, off) <= 0)
             return 0;
-    } else {
-        off = 0;
     }
 
     if (BIO_printf(fp, "%s", name) <= 0)
